@@ -1,0 +1,137 @@
+* Overview
+  This repo hosts a large-scale CodeQL demo database for **Firefox**.
+  Purpose: to demonstrate realistic CodeQL performance and scaling.  
+  Smaller demo repos understate costs and mislead about practical usage.
+
+  This is work in progress.
+
+* Download Artifacts
+  Base URL: https://github.com/hohn/codeql-for-firefox/releases
+
+  | Filename                                        | Size    | Description                       | URL |
+  |-------------------------------------------------+---------+-----------------------------------+-----|
+  | firefox-db-bm-none.tar.zst                      | 1.66 GB | Full CodeQL DB (build-mode=none)  | [[https://github.com/hohn/codeql-for-firefox/releases/download/build-artifacts-1.0/firefox-db-bm-none.tar.zst][link]] |
+  | firefox-db-cpp-scan-bm-none.formatted.sarif.zst | 72.1 MB | SARIF results, C++ scan (bm=none) | [[https://github.com/hohn/codeql-for-firefox/releases/download/build-artifacts-1.0/firefox-db-cpp-scan-bm-none.formatted.sarif.zst][link]] |
+  | firefox-db-cpp-scan.formatted.sarif.zst         | 986 KB  | SARIF results, C++ scan (with bm) | [[https://github.com/hohn/codeql-for-firefox/releases/download/build-artifacts-1.0/firefox-db-cpp-scan.formatted.sarif.zst][link]] |
+  | firefox-db.tar.zst                              | 756 MB  | Full CodeQL DB (trace build mode) | [[https://github.com/hohn/codeql-for-firefox/releases/download/build-artifacts-1.0/firefox-db.tar.zst][link]] |
+
+  The **bm** abbreviation is for build mode.  In particular:
+  - bm=none → extraction only, no actual build
+  - plain → traced build
+
+* Building a CodeQL DB for Firefox (Linux, build-mode=trace-command)
+  #+BEGIN_SRC sh
+    cd ~/large-local-only/firefox/firefox
+    ./mach clobber
+    export PATH=/home/hohn/large-local-only/codeql:$PATH
+    source /home/hohn/.cargo/env
+
+    codeql database init \
+      --language=cpp \
+      --source-root=. \
+      firefox-db
+
+    ./mach configure
+
+    # Run under tracing (OOM at -j20, succeeded with -j10)
+    codeql database trace-command firefox-db -- ./mach build -j10
+
+    codeql database finalize firefox-db
+  #+END_SRC
+
+  **Timings**
+  - Plain Firefox build: ~10 minutes
+  - Build with CodeQL trace: ~57 minutes
+  - Finalize: ~50 minutes
+
+* Build Stats (firefox-db)
+  | Phase             | Directory   | Size  | Notes                  |
+  |-------------------+-------------+-------+------------------------|
+  | During finalize   | trap/       | 16.5G | TRAP facts             |
+  |                   | db-cpp/     | 7.0G  | Relational store       |
+  |                   | log/        | 2.8G  | Build + extractor logs |
+  |                   | src/        | 561M  | Source snapshot        |
+  | After finalize    | db-cpp/     | 2.5G  | Relational store       |
+  |                   | log/        | 2.9G  | Logs                   |
+  |                   | diagnostic/ | 32K   | Scratch                |
+  | Final DB size     | firefox-db/ | 5.5G  | Usable DB              |
+  | Distribution file | tar.zst     | 757M  | Compressed archive     |
+
+  Note: numbers differ between “interim DB size” (~27 GB) and “final
+  size” (5.5 GB).  
+
+* Building a DB with build-mode=none
+  #+BEGIN_SRC sh
+    cd ~/large-local-only/firefox/firefox
+    ./mach clobber
+    rm -rf obj-x86_64-pc-linux-gnu/ firefox-db*
+    export PATH=/home/hohn/large-local-only/codeql:$PATH
+    source /home/hohn/.cargo/env
+
+    ./mach configure
+
+    codeql database create \
+           --language=cpp \
+           --source-root=. \
+           --threads 20 \
+           --ram=50000 \
+           --build-mode=none \
+           firefox-db-bm-none
+
+    tar --use-compress-program="zstd -19 -T0" -cvf \
+        firefox-db-bm-none.tar.zst firefox-db-bm-none
+  #+END_SRC
+
+  **Results**
+  - Extraction time: ~17 minutes (init → finalize)
+  - TRAP import: 11m14s
+  - Final DB size: ~2–3 GB relational store + 137 MB source archive
+  - Compressed archive: 1.66 GB
+
+* Query Suite Selection
+  Available suites (CodeQL 1.4.6 cpp-queries):
+
+  | Suite                         | Queries |
+  |-------------------------------+---------|
+  | cpp-code-scanning.qls         | 60      |
+  | cpp-lgtm.qls                  | 108     |
+  | cpp-lgtm-full.qls             | 178     |
+  | cpp-security-and-quality.qls  | 181     |
+  | cpp-security-experimental.qls | 134     |
+  | cpp-security-extended.qls     | 97      |
+
+* Benchmarks (firefox-db, trace build)
+  - DB: firefox-db
+  - Suite: cpp-code-scanning (60 queries)
+  - Host: Mac Studio (28c / 256 GB RAM, CodeQL 2.22.4)
+
+  | Walltime | CPU% | User CPU (s) | Sys CPU (s) | Max RSS (GB) | Maj PF | Min PF  | Invol CS | Vol CS |
+  |----------+------+--------------+-------------+--------------+--------+---------+----------+--------|
+  | 22:16    | 1065 | 13775        | 464         | 124          | 124776 | 8.2 M   | 48.3 M   | 230647 |
+
+  Notes:
+  - ~22 minutes for “short” suite (60 queries)
+  - ~10.6 cores saturated
+  - Peak RAM: 124 GB, no swap
+  - Very high context switch activity
+
+* Benchmarks (firefox-db-bm-none)
+  - Wall time: 23m41s
+  - CPU time: 13 555 s (≈953% CPU utilization, ~9.5 cores avg)
+  - Max RAM: 126 GB
+  - Page faults: 294 k major, 10 M minor
+  - Context switches: 25.9 M invol, 248 k vol
+  - SARIF output: 2.9 GB (!), vs 33 MB for build-traced DB
+
+* Run Summary
+  | DB                | SARIF size | Log size |
+  |-------------------+------------+----------|
+  | firefox-db        | 33 MB      | 32 KB    |
+  | firefox-db-bm-none| 2.9 GB     | 32 KB    |
+
+* SARIF Output Notes
+  Using minimize-sarif.py:
+  - firefox-db-cpp-scan-bm-none: 4.06 GB → 805 KB, 104 results
+  - firefox-db-cpp-scan: 53 MB → 2.1 MB, 732 results
+
+
