@@ -28,7 +28,7 @@ def walk(x, path="root"):
             yield from walk(v, f"{path}.{k}")
     elif isinstance(x, list):
         yield path, sizeof(x)
-        for i,v in enumerate(x):
+        for i, v in enumerate(x):
             yield from walk(v, f"{path}[{i}]")
 
 # Create minimal SARIF structure
