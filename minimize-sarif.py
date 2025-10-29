@@ -10,6 +10,28 @@ import sys
 from pathlib import Path
 from typing import Dict, Any, List
 
+# functions used to calculate size of SARIF subtrees
+def sizeof(x):
+    t = type(x)
+    if t is dict:
+        return sum(len(k) + sizeof(v) for k, v in x.items())
+    if t is list:
+        return sum(sizeof(v) for v in x)
+    if t is str:
+        return len(x)
+    return 8  # numbers, bools, null
+
+def walk(x, path="root"):
+    if isinstance(x, dict):
+        yield path, sizeof(x)
+        for k,v in x.items():
+            yield from walk(v, f"{path}.{k}")
+    elif isinstance(x, list):
+        yield path, sizeof(x)
+        for i,v in enumerate(x):
+            yield from walk(v, f"{path}[{i}]")
+
+# Create minimal SARIF structure
 def create_minimal_sarif(original_sarif: Dict[str, Any]) -> Dict[str, Any]:
     """
     Create a minimal valid SARIF file containing only results and required metadata.
@@ -123,7 +145,7 @@ def format_size(size_bytes: int) -> str:
     return f"{size_bytes:.2f} TB"
 
 def process_sarif_file(input_path: Path, output_path: Path = None, 
-                      verbose: bool = False) -> None:
+                      verbose: bool = False, sarif_size_subtrees: bool = False) -> None:
     """
     Process a SARIF file to extract only results.
     
@@ -131,6 +153,7 @@ def process_sarif_file(input_path: Path, output_path: Path = None,
         input_path: Path to input SARIF file
         output_path: Path to output file (optional, auto-generated if not provided)
         verbose: Print detailed information
+        sarif_size_subtrees: Include size information for SARIF subtrees
     """
     
     if not input_path.exists():
@@ -143,8 +166,8 @@ def process_sarif_file(input_path: Path, output_path: Path = None,
     
     try:
         # Read original SARIF
-        if verbose:
-            print(f"Reading: {input_path}")
+        #if verbose:
+         #   print(f"Reading: {input_path}")
         
         with open(input_path, 'r', encoding='utf-8') as f:
             original_sarif = json.load(f)
@@ -182,6 +205,16 @@ def process_sarif_file(input_path: Path, output_path: Path = None,
                 if removed_keys:
                     print(f"  Removed sections: {', '.join(sorted(removed_keys))}")
         
+        # APS: Include SARIF subtree size information if requested via command line
+        if sarif_size_subtrees:
+            # Calculate the size of the SARIF subtrees
+            print("  Processing SARIF subtree size information... ")
+
+            sizes = sorted(walk(original_sarif), key=lambda kv: kv[1], reverse=True)
+            for p, s in sizes[:50]:
+                print(f"{s:10d}  {p}")
+
+    
     except json.JSONDecodeError as e:
         print(f"Error: Invalid JSON in '{input_path}': {e}", file=sys.stderr)
     except Exception as e:
@@ -229,6 +262,12 @@ Examples:
         help="Show detailed information about processing"
     )
     
+    parser.add_argument(
+        "--sarif_size_subtrees",
+        action="store_true",
+        help="Include size information for SARIF subtrees"
+    )
+    
     args = parser.parse_args()
     
     # Validate arguments
@@ -240,7 +279,8 @@ Examples:
         process_sarif_file(
             input_file,
             args.output if len(args.input_files) == 1 else None,
-            args.verbose
+            args.verbose,
+            args.sarif_size_subtrees
         )
 
 if __name__ == "__main__":
