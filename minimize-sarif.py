@@ -166,8 +166,8 @@ def process_sarif_file(input_path: Path, output_path: Path = None,
     
     try:
         # Read original SARIF
-        #if verbose:
-         #   print(f"Reading: {input_path}")
+        if verbose:
+            print(f"Reading: {input_path}")
         
         with open(input_path, 'r', encoding='utf-8') as f:
             original_sarif = json.load(f)
