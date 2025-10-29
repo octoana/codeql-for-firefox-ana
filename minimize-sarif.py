@@ -24,7 +24,7 @@ def sizeof(x):
 def walk(x, path="root"):
     if isinstance(x, dict):
         yield path, sizeof(x)
-        for k,v in x.items():
+        for k, v in x.items():
             yield from walk(v, f"{path}.{k}")
     elif isinstance(x, list):
         yield path, sizeof(x)
