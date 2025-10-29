@@ -24,7 +24,7 @@ def sizeof(x):
 def walk(x, path="root"):
     if isinstance(x, dict):
         yield path, sizeof(x)
-        for k,v in x.items():
+        for k, v in x.items():
             yield from walk(v, f"{path}.{k}")
     elif isinstance(x, list):
         yield path, sizeof(x)
@@ -214,7 +214,6 @@ def process_sarif_file(input_path: Path, output_path: Path = None,
             for p, s in sizes[:50]:
                 print(f"{s:10d}  {p}")
 
-    
     except json.JSONDecodeError as e:
         print(f"Error: Invalid JSON in '{input_path}': {e}", file=sys.stderr)
     except Exception as e:
